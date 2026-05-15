@@ -31,6 +31,37 @@ NONE_VALUES = {"нет", "none", "null", "nan", ""}
 
 ROW_ACCURACY_THRESHOLD = 0.8
 
+DEFAULT_FIELD_WEIGHTS: dict[str, float] = {
+    # Identifiers — highest importance
+    "barcode":                 3.0,
+    "id_sku":                  2.0,
+    "code":                    2.0,
+    "qr_code_barcode":         2.0,
+    "action_code_qr":          2.0,
+    # Core prices
+    "price_default":           2.0,
+    "price_card":              2.0,
+    "price_discount":          1.5,
+    "action_price_qr":         1.5,
+    # QR prices and wholesale
+    "price1_qr":               1.0,
+    "price2_qr":               1.0,
+    "price3_qr":               1.0,
+    "price4_qr":               1.0,
+    "wholesale_level_1_price": 1.0,
+    "wholesale_level_2_price": 1.0,
+    # Other fields
+    "product_name":            1.0,
+    "discount_amount":         1.0,
+    "wholesale_level_1_coun":  0.5,
+    "wholesale_level_2_count": 0.5,
+    "print_datetime":          0.5,
+    "color":                   0.5,
+    "additional_info":         0.25,
+    "special_symbols":         0.25,
+}
+DEFAULT_WEIGHT = 1.0  # fallback for fields not listed above
+
 
 def normalize(value, field: str) -> str | float | None:
     """Return normalised comparable value, or None meaning 'absent'.
@@ -121,6 +152,27 @@ def content_fields(df: pd.DataFrame) -> list[str]:
     return [c for c in df.columns if c not in MATCH_KEY_FIELDS]
 
 
+def weighted_row_accuracy(pred_row, gt_row, fields: list[str],
+                          weights: dict[str, float]) -> tuple[float, list[str]]:
+    """Return (weighted_accuracy 0-1, list of wrong field names)."""
+    w_total, w_correct = 0.0, 0.0
+    errors = []
+    for f in fields:
+        gt_val = normalize(gt_row.get(f), f) if f in gt_row.index else None
+        pred_val = normalize(pred_row.get(f), f) if f in pred_row.index else None
+        if gt_val is None:
+            continue
+        w = weights.get(f, DEFAULT_WEIGHT)
+        w_total += w
+        if pred_val == gt_val:
+            w_correct += w
+        else:
+            errors.append(f)
+    if w_total == 0:
+        return 1.0, []
+    return w_correct / w_total, errors
+
+
 def row_accuracy(pred_row, gt_row, fields: list[str]) -> tuple[float, list[str]]:
     """Return (accuracy 0-1, list of wrong field names)."""
     evaluated, correct = 0, 0
@@ -145,29 +197,32 @@ def row_accuracy(pred_row, gt_row, fields: list[str]) -> tuple[float, list[str]]
 
 
 def match(pred_df: pd.DataFrame, gt_df: pd.DataFrame,
-          time_tol_ms: float, iou_thresh: float):
-
-    # Build barcode index for GT
-    gt_barcode_index: dict[str, int] = {}
-    for idx, row in gt_df.iterrows():
-        bc = barcode_key(row)
-        if bc:
-            gt_barcode_index[bc] = idx
+          time_tol_ms: float, iou_thresh: float, barcode_pass: bool = True):
 
     gt_used: set[int] = set()
     records = []  # (pred_idx, gt_idx|None, match_type, score)
 
     # --- Pass 1: barcode matching ---
     unmatched_pred = []
-    for pidx, prow in pred_df.iterrows():
-        bc = barcode_key(prow)
-        if bc and bc in gt_barcode_index:
-            gidx = gt_barcode_index[bc]
-            if gidx not in gt_used:
-                gt_used.add(gidx)
-                records.append((pidx, gidx, "barcode", 1.0))
-                continue
-        unmatched_pred.append(pidx)
+    if barcode_pass:
+        # Build barcode index for GT
+        gt_barcode_index: dict[str, int] = {}
+        for idx, row in gt_df.iterrows():
+            bc = barcode_key(row)
+            if bc:
+                gt_barcode_index[bc] = idx
+
+        for pidx, prow in pred_df.iterrows():
+            bc = barcode_key(prow)
+            if bc and bc in gt_barcode_index:
+                gidx = gt_barcode_index[bc]
+                if gidx not in gt_used:
+                    gt_used.add(gidx)
+                    records.append((pidx, gidx, "barcode", 1.0))
+                    continue
+            unmatched_pred.append(pidx)
+    else:
+        unmatched_pred = list(pred_df.index)
 
     # --- Pass 2: spatial-temporal matching ---
     has_bbox = all(c in pred_df.columns for c in ("x_min", "y_min", "x_max", "y_max"))
@@ -243,12 +298,14 @@ def evaluate(pred_path: str, gt_path: str, out_path: str, matches_out: str,
     field_correct: dict[str, int] = {f: 0 for f in all_fields}
     field_total: dict[str, int] = {f: 0 for f in all_fields}
     high_accuracy_gt: set = set()
+    high_accuracy_weighted_gt: set = set()
 
     for pidx, gidx, mtype, mscore in records:
         prow = pred_df.loc[pidx]
         if gidx is not None:
             grow = gt_df.loc[gidx]
             acc, errors = row_accuracy(prow, grow, all_fields)
+            wacc, _ = weighted_row_accuracy(prow, grow, all_fields, DEFAULT_FIELD_WEIGHTS)
             # per-field stats
             for f in all_fields:
                 gt_val = normalize(grow.get(f), f) if f in grow.index else None
@@ -264,8 +321,11 @@ def evaluate(pred_path: str, gt_path: str, out_path: str, matches_out: str,
                 matched_by_spatial += 1
             if acc >= ROW_ACCURACY_THRESHOLD:
                 high_accuracy_gt.add(gidx)
+            if wacc >= ROW_ACCURACY_THRESHOLD:
+                high_accuracy_weighted_gt.add(gidx)
         else:
             acc, errors = 0.0, []
+            wacc = 0.0
 
         match_rows.append({
             "pred_index": pidx,
@@ -273,6 +333,7 @@ def evaluate(pred_path: str, gt_path: str, out_path: str, matches_out: str,
             "match_type": mtype,
             "match_score": round(mscore, 4),
             "row_accuracy": round(acc, 4),
+            "weighted_row_accuracy": round(wacc, 4),
             "field_errors": "|".join(errors),
         })
 
@@ -281,6 +342,7 @@ def evaluate(pred_path: str, gt_path: str, out_path: str, matches_out: str,
     unmatched_result = sum(1 for _, gidx, _, _ in records if gidx is None)
     unmatched_gt = total_gt - len(gt_matched_idxs)
     final_score = len(high_accuracy_gt) / total_gt if total_gt else 0.0
+    weighted_final_score = len(high_accuracy_weighted_gt) / total_gt if total_gt else 0.0
 
     field_accuracy = {
         f: round(field_correct[f] / field_total[f], 4) if field_total[f] else None
@@ -320,6 +382,8 @@ def evaluate(pred_path: str, gt_path: str, out_path: str, matches_out: str,
         "unmatched_result": unmatched_result,
         "unmatched_gt": unmatched_gt,
         "final_score": round(final_score, 4),
+        "weighted_final_score": round(weighted_final_score, 4),
+        "field_weights": DEFAULT_FIELD_WEIGHTS,
         "row_accuracy_threshold": ROW_ACCURACY_THRESHOLD,
         "time_tolerance_ms": time_tol_ms,
         "iou_threshold": iou_thresh,
@@ -361,12 +425,74 @@ def evaluate(pred_path: str, gt_path: str, out_path: str, matches_out: str,
     print(f"  Matched by spatial: {matched_by_spatial}")
     print(f"  Unmatched pred:     {unmatched_result}")
     print(f"  Unmatched GT:       {unmatched_gt}")
-    print(f"  High-accuracy GT:   {len(high_accuracy_gt)} (acc >= {ROW_ACCURACY_THRESHOLD})")
-    print(f"  FINAL SCORE:        {final_score:.4f}")
+    print(f"  High-accuracy GT:          {len(high_accuracy_gt)} (acc >= {ROW_ACCURACY_THRESHOLD})")
+    print(f"  Weighted high-accuracy GT: {len(high_accuracy_weighted_gt)} (weighted_acc >= {ROW_ACCURACY_THRESHOLD})")
+    print(f"  FINAL SCORE:               {final_score:.4f}")
+    print(f"  WEIGHTED FINAL SCORE:      {weighted_final_score:.4f}")
     print(f"\n  Field accuracy (top fields):")
     for f, acc in sorted(field_accuracy.items(), key=lambda x: -(x[1] or 0))[:10]:
         if acc is not None:
             print(f"    {f:<35} {acc:.2%}")
+    print(f"\n  Report  -> {out_path}")
+    print(f"  Matches -> {matches_out}\n")
+
+
+def evaluate_detection(pred_path: str, gt_path: str, out_path: str, matches_out: str,
+                       time_tol_ms: float, iou_thresh: float):
+
+    pred_df = load_csv(pred_path)
+    gt_df = load_csv(gt_path)
+
+    records, gt_matched_idxs = match(pred_df, gt_df, time_tol_ms, iou_thresh,
+                                     barcode_pass=False)
+
+    total_gt = len(gt_df)
+    total_pred = len(pred_df)
+    matched_gt = len(gt_matched_idxs)
+    unmatched_gt = total_gt - matched_gt
+    false_positives = sum(1 for _, gidx, _, _ in records if gidx is None)
+
+    recall = matched_gt / total_gt if total_gt else 0.0
+    precision = matched_gt / total_pred if total_pred else 0.0
+    f1 = (2 * precision * recall / (precision + recall)
+          if (precision + recall) > 0 else 0.0)
+
+    report = {
+        "mode": "detection_only",
+        "total_gt": total_gt,
+        "total_pred": total_pred,
+        "matched_gt": matched_gt,
+        "unmatched_gt": unmatched_gt,
+        "false_positives": false_positives,
+        "recall": round(recall, 4),
+        "precision": round(precision, 4),
+        "f1": round(f1, 4),
+        "time_tolerance_ms": time_tol_ms,
+        "iou_threshold": iou_thresh,
+    }
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+
+    match_rows = []
+    for pidx, gidx, mtype, mscore in records:
+        match_rows.append({
+            "pred_index": pidx,
+            "gt_index": gidx if gidx is not None else "",
+            "match_type": mtype,
+            "iou_score": round(mscore, 4),
+        })
+    pd.DataFrame(match_rows).to_csv(matches_out, index=False, encoding="utf-8-sig")
+
+    print(f"\n=== Detection-Only Evaluation ===")
+    print(f"  GT boxes:        {total_gt}")
+    print(f"  Pred boxes:      {total_pred}")
+    print(f"  Matched GT:      {matched_gt}")
+    print(f"  Unmatched GT:    {unmatched_gt}  (missed)")
+    print(f"  False positives: {false_positives}")
+    print(f"  Recall:          {recall:.4f}")
+    print(f"  Precision:       {precision:.4f}")
+    print(f"  F1:              {f1:.4f}")
     print(f"\n  Report  -> {out_path}")
     print(f"  Matches -> {matches_out}\n")
 
@@ -381,6 +507,8 @@ def main():
                         help="Max timestamp difference in ms for spatial matching")
     parser.add_argument("--iou-threshold", type=float, default=0.3,
                         help="Minimum IoU for spatial matching")
+    parser.add_argument("--detection-only", action="store_true",
+                        help="Evaluate detection only (bbox+timestamp); skip content fields")
     args = parser.parse_args()
 
     for p in (args.pred, args.gt):
@@ -388,7 +516,7 @@ def main():
             print(f"Error: file not found: {p}", file=sys.stderr)
             sys.exit(1)
 
-    evaluate(
+    kwargs = dict(
         pred_path=args.pred,
         gt_path=args.gt,
         out_path=args.out,
@@ -396,6 +524,10 @@ def main():
         time_tol_ms=args.time_tolerance_ms,
         iou_thresh=args.iou_threshold,
     )
+    if args.detection_only:
+        evaluate_detection(**kwargs)
+    else:
+        evaluate(**kwargs)
 
 
 if __name__ == "__main__":
