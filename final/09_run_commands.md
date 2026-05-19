@@ -1,33 +1,30 @@
 # Команды запуска и проверки
 
-## 1) Kaggle: быстрый запуск через notebook
-1. Загрузить проект в `/kaggle/working/LentaHack26`.
-2. Открыть `final/03_ultimate_pipeline.ipynb`.
-3. Выполнить первую bootstrap-ячейку (она докачает зависимости).
-4. После установки сделать `Restart session` и выполнить `Run all`.
+## 1) Один ноутбук (рекомендуется)
+Есть единый notebook-блок OCR в:
+- `final.ipynb` (в конце файла, секция `OCR CHAMPION SECTION`)
+- `final/03_ultimate_pipeline.ipynb` (та же секция как standalone)
 
-## 2) Локальный запуск champion-конфигурации
-Из корня проекта:
+Запуск локально:
+1. Откройте `final.ipynb`.
+2. Прокрутите до секции `OCR CHAMPION SECTION`.
+3. Запустите ячейки секции сверху вниз.
 
-```bash
-python3 hypothesis_campaign.py run_bundle \
-  --project-root . \
-  --dataset-root ./top_crops \
-  --task-path ./lenta_tech_life_hack_text.md \
-  --notebook notebookc9d692d630.ipynb \
-  --output-root ./remote_outputs/final_repro_omega2 \
-  --mode sample \
-  --sample-size 96 \
-  --visual-panel-size 24 \
-  --seed 123 \
-  --timeout -1 \
-  --jupyter-cmd jupyter \
-  --products-dict-csv ./products_v2_merged.csv \
-  --google-dict-csv ./google_dict_normalized.csv \
-  --from-scratch \
-  --guardrail-tolerance-pp 1.0 \
-  --bundle "omega2_fixed=data_input/H2,preprocess/H1,ocr/H4,parsers/H2,parsers/H4,qr_barcode/H1,track_merge/H1"
+Запуск в Kaggle:
+1. `git clone` проект в `/kaggle/working/LentaHack26` или `/kaggle/working/LentaHack26b`.
+2. Откройте `final.ipynb` (или `final/03_ultimate_pipeline.ipynb`).
+3. Запустите первую ячейку секции (bootstrap зависимостей).
+4. Сделайте `Restart session`, затем `Run all` по секции.
+5. Если датасет не прикреплён через UI Kaggle, задайте переменную:
+
+```python
+import os
+os.environ["KAGGLE_DATASET_SLUG"] = "owner/dataset-name"
 ```
+
+## 2) Опциональный CLI запуск (если runner-файлы присутствуют)
+Если в проекте есть `run_champion_pipeline.py` или `hypothesis_campaign.py`, notebook сам вызовет их.
+Отдельный ручной запуск обычно не нужен.
 
 ## 3) Быстрая проверка результата и схемы
 
