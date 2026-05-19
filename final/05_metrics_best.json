@@ -1,0 +1,57 @@
+{
+  "rows": 96,
+  "fill_rate": {
+    "filename": 1.0,
+    "product_name": 0.6979166666666666,
+    "price_default": 0.71875,
+    "price_card": 0.0,
+    "price_discount": 0.8541666666666666,
+    "barcode": 0.2604166666666667,
+    "discount_amount": 0.40625,
+    "id_sku": 0.010416666666666666,
+    "print_datetime": 0.0,
+    "code": 0.0,
+    "additional_info": 0.5625,
+    "color": 1.0,
+    "special_symbols": 1.0,
+    "frame_timestamp": 0.0,
+    "x_min": 1.0,
+    "y_min": 1.0,
+    "x_max": 1.0,
+    "y_max": 1.0,
+    "qr_code_barcode": 0.0,
+    "price1_qr": 0.0,
+    "price2_qr": 0.0,
+    "price3_qr": 0.0,
+    "price4_qr": 0.0,
+    "wholesale_level_1_count": 0.0,
+    "wholesale_level_1_price": 0.0,
+    "wholesale_level_2_count": 0.0,
+    "wholesale_level_2_price": 0.0,
+    "action_price_qr": 0.0,
+    "action_code_qr": 0.0
+  },
+  "key_fill": {
+    "product_name": 0.6979166666666666,
+    "price_discount": 0.8541666666666666,
+    "barcode": 0.2604166666666667
+  },
+  "proxy_score": 0.6651041666666666,
+  "proxy_score_v1": 0.6651041666666666,
+  "price_any_fill": 0.8541666666666666,
+  "component_scores": {
+    "name_quality": 0.6694851111496777,
+    "price_quality": 0.5525347222222222,
+    "barcode_quality": 0.09322916666666665,
+    "value_validity": 0.8897569444444445
+  },
+  "case_proxy_v2": 0.5521895805690538,
+  "ranking_mode": "case_proxy_v2",
+  "ranking_score": 0.5521895805690538,
+  "elapsed_sec": 1794.2572929859161,
+  "official": {
+    "available": false,
+    "mode": "not_requested"
+  },
+  "official_final_score": null
+}
